@@ -1,0 +1,253 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Simple Integration Calculator</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/mathjs/11.8.0/math.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background-color: #f5f7fb;
+            color: #333;
+            margin: 0;
+            padding: 20px;
+            display: flex;
+            justify-content: center;
+        }
+        .container {
+            background: #ffffff;
+            padding: 30px;
+            border-radius: 12px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.08);
+            max-width: 800px;
+            width: 100%;
+        }
+        h1 {
+            font-size: 24px;
+            margin-bottom: 20px;
+            color: #1e293b;
+            text-align: center;
+        }
+        .grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+            margin-bottom: 20px;
+        }
+        @media (max-width: 600px) {
+            .grid { grid-template-columns: 1fr; }
+        }
+        .input-group {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+        label {
+            font-weight: 600;
+            font-size: 14px;
+            color: #475569;
+        }
+        input {
+            padding: 10px;
+            border: 1px solid #cbd5e1;
+            border-radius: 6px;
+            font-size: 16px;
+            outline: none;
+            transition: border 0.2s;
+        }
+        input:focus {
+            border-color: #3b82f6;
+        }
+        .result-box {
+            background: #eff6ff;
+            border: 1px solid #bfdbfe;
+            padding: 15px;
+            border-radius: 8px;
+            text-align: center;
+            margin-top: 20px;
+            font-size: 18px;
+            font-weight: bold;
+            color: #1e40af;
+        }
+        .error {
+            color: #dc2626;
+            font-size: 14px;
+            margin-top: 5px;
+            display: none;
+        }
+        canvas {
+            margin-top: 20px;
+            max-height: 400px;
+        }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h1>Integration Calculator & Visualizer</h1>
+    
+    <div class="grid">
+        <div class="input-group" style="grid-column: span 2;">
+            <label for="function">Function f(x)</label>
+            <input type="text" id="function" value="x^2 - 2*x + 1" placeholder="e.g., sin(x), x^2, 2*x">
+            <div id="error-msg" class="error">Invalid mathematical expression.</div>
+        </div>
+        <div class="input-group">
+            <label for="lowerBound">Lower Bound (a)</label>
+            <input type="number" id="lowerBound" value="0" step="any">
+        </div>
+        <div class="input-group">
+            <label for="upperBound">Upper Bound (b)</label>
+            <input type="number" id="upperBound" value="3" step="any">
+        </div>
+    </div>
+
+    <div class="result-box" id="result">
+        Estimated Integral: Loading...
+    </div>
+
+    <canvas id="graphCanvas"></canvas>
+</div>
+
+<script>
+    let chartInstance = null;
+
+    // Numerical integration using Trapezoidal Rule
+    function trapezoidalRule(fn, a, b, n = 200) {
+        const h = (b - a) / n;
+        let sum = 0.5 * (fn(a) + fn(b));
+        
+        for (let i = 1; i < n; i++) {
+            sum += fn(a + i * h);
+        }
+        
+        return sum * h;
+    }
+
+    function calculateAndGraph() {
+        const formulaInput = document.getElementById('function').value;
+        const a = parseFloat(document.getElementById('lowerBound').value);
+        const b = parseFloat(document.getElementById('upperBound').value);
+        const errorMsg = document.getElementById('error-msg');
+        const resultDiv = document.getElementById('result');
+
+        if (isNaN(a) || isNaN(b)) return;
+
+        try {
+            errorMsg.style.display = 'none';
+            // Compile the math expression using math.js
+            const compiledExpr = math.compile(formulaInput);
+            const f = (x) => compiledExpr.evaluate({ x: x });
+
+            // Ensure the function works by testing a value
+            f(a); 
+
+            // Calculate the definite integral
+            const integralResult = trapezoidalRule(f, a, b);
+            resultDiv.innerText = `Estimated Integral (Area): ${integralResult.toFixed(4)}`;
+
+            // Generate data points for the graph
+            // We expand the window slightly past 'a' and 'b' for context
+            const padding = Math.abs(b - a) * 0.4 || 2; 
+            const graphMin = Math.min(a, b) - padding;
+            const graphMax = Math.max(a, b) + padding;
+            
+            const totalPoints = 150;
+            const step = (graphMax - graphMin) / totalPoints;
+            
+            const lineData = [];
+            const fillData = [];
+
+            for (let i = 0; i <= totalPoints; i++) {
+                const currentX = graphMin + i * step;
+                let currentY;
+                
+                try {
+                    currentY = f(currentX);
+                } catch(e) {
+                    currentY = null;
+                }
+
+                if (typeof currentY === 'number' && !isNaN(currentY)) {
+                    lineData.push({ x: currentX, y: currentY });
+                    
+                    // If currentX falls within the bounds, add it to the filled area dataset
+                    if (currentX >= Math.min(a, b) && currentX <= Math.max(a, b)) {
+                        fillData.push({ x: currentX, y: currentY });
+                    }
+                }
+            }
+
+            updateChart(lineData, fillData, a, b);
+
+        } catch (error) {
+            errorMsg.style.display = 'block';
+            resultDiv.innerText = 'Estimated Integral: N/A';
+        }
+    }
+
+    function updateChart(lineData, fillData, a, b) {
+        const ctx = document.getElementById('graphCanvas').getContext('2d');
+
+        if (chartInstance) {
+            chartInstance.destroy();
+        }
+
+        chartInstance = new Chart(ctx, {
+            type: 'scatter',
+            data: {
+                datasets: [
+                    {
+                        label: 'f(x)',
+                        data: lineData,
+                        showLine: true,
+                        borderColor: '#2563eb',
+                        borderWidth: 2.5,
+                        pointRadius: 0,
+                        fill: false
+                    },
+                    {
+                        label: `Area (${a} to ${b})`,
+                        data: fillData,
+                        showLine: true,
+                        borderColor: 'transparent',
+                        backgroundColor: 'rgba(59, 130, 246, 0.25)',
+                        pointRadius: 0,
+                        fill: 'origin' // Fills down/up to the x-axis
+                    }
+                ]
+            },
+            options: {
+                responsive: true,
+                plugins: {
+                    legend: { display: true, position: 'top' }
+                },
+                scales: {
+                    x: {
+                        type: 'linear',
+                        position: 'bottom',
+                        grid: { color: '#e2e8f0' }
+                    },
+                    y: {
+                        type: 'linear',
+                        grid: { color: '#e2e8f0' }
+                    }
+                },
+                animation: { duration: 200 }
+            }
+        });
+    }
+
+    // Attach event listeners for real-time updates
+    document.getElementById('function').addEventListener('input', calculateAndGraph);
+    document.getElementById('lowerBound').addEventListener('input', calculateAndGraph);
+    document.getElementById('upperBound').addEventListener('input', calculateAndGraph);
+
+    // Initial run on page load
+    calculateAndGraph();
+</script>
+
+</body>
+</html>
